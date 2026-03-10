@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"bytes"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -172,6 +173,7 @@ func (a *Common) Dependencies() []asset.Asset {
 		&tls.KubeletServingCABundle{},
 		&tls.MCSCertKey{},
 		&tls.IRICertKey{},
+		&tls.IRIRegistryCredentials{},
 		&tls.RootCA{},
 		&tls.ServiceAccountKeyPair{},
 		&tls.IronicTLSCert{},
@@ -380,10 +382,28 @@ func (a *Common) getTemplateData(dependencies asset.Parents, bootstrapInPlace bo
 
 	openshiftInstallInvoker := os.Getenv("OPENSHIFT_INSTALL_INVOKER")
 
+	pullSecret := installConfig.Config.PullSecret
+
+	// Merge IRI registry credentials into pull secret if available.
+	// IRIRegistryCredentials generates credentials only when the NoRegistryClusterInstall
+	// feature gate is enabled and an InternalReleaseImage manifest is present.
+	// This ensures kubelet/CRI-O on bootstrap and cluster nodes can
+	// authenticate to the IRI registry on master nodes.
+	iriAuth := &tls.IRIRegistryCredentials{}
+	dependencies.Get(iriAuth)
+	if iriAuth.Password != "" {
+		iriRegistryHost := fmt.Sprintf("api-int.%s:22625", installConfig.Config.ClusterDomain())
+		merged, err := mergeIRIAuthIntoPullSecret(pullSecret, iriAuth.Username, iriAuth.Password, iriRegistryHost)
+		if err != nil {
+			logrus.Fatalf("Failed to merge IRI registry credentials into pull secret: %v", err)
+		}
+		pullSecret = merged
+	}
+
 	return &bootstrapTemplateData{
 		AdditionalTrustBundle: installConfig.Config.AdditionalTrustBundle,
 		FIPS:                  installConfig.Config.FIPS,
-		PullSecret:            installConfig.Config.PullSecret,
+		PullSecret:            pullSecret,
 		SSHKey:                installConfig.Config.SSHKey,
 		ReleaseImage:          releaseImage.PullSpec,
 		EtcdCluster:           strings.Join(etcdEndpoints, ","),
@@ -405,6 +425,31 @@ func (a *Common) getTemplateData(dependencies asset.Parents, bootstrapInPlace bo
 		ClusterDomain:         installConfig.Config.ClusterDomain(),
 		StreamTag:             rhcosutils.GetPayloadImageStreamTag(installConfig.Config.OSImageStream),
 	}
+}
+
+// mergeIRIAuthIntoPullSecret merges IRI registry authentication credentials
+// into the pull secret so that kubelet/CRI-O can authenticate to the IRI registry.
+func mergeIRIAuthIntoPullSecret(pullSecret, username, password, registryHost string) (string, error) {
+	var pullSecretMap map[string]interface{}
+	if err := json.Unmarshal([]byte(pullSecret), &pullSecretMap); err != nil {
+		return "", fmt.Errorf("failed to parse pull secret: %w", err)
+	}
+
+	auths, ok := pullSecretMap["auths"].(map[string]interface{})
+	if !ok {
+		return "", fmt.Errorf("pull secret missing 'auths' field")
+	}
+
+	authValue := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", username, password)))
+	auths[registryHost] = map[string]interface{}{
+		"auth": authValue,
+	}
+
+	mergedBytes, err := json.Marshal(pullSecretMap)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal merged pull secret: %w", err)
+	}
+	return string(mergedBytes), nil
 }
 
 // AddStorageFiles adds files to a Ignition config.

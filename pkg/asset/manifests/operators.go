@@ -76,6 +76,7 @@ func (m *Manifests) Dependencies() []asset.Asset {
 		&tls.RootCA{},
 		&tls.MCSCertKey{},
 		&tls.IRICertKey{},
+		&tls.IRIRegistryCredentials{},
 		&manifests.InternalReleaseImage{},
 		new(rhcos.Image),
 
@@ -87,6 +88,7 @@ func (m *Manifests) Dependencies() []asset.Asset {
 		&bootkube.MachineConfigServerTLSSecret{},
 		&bootkube.OpenshiftConfigSecretPullSecret{},
 		&bootkube.InternalReleaseImageTLSSecret{},
+		&bootkube.InternalReleaseImageRegistryAuthSecret{},
 		&BMCVerifyCAConfigMap{},
 	}
 }
@@ -234,6 +236,7 @@ func (m *Manifests) generateBootKubeManifests(dependencies asset.Parents) []*ass
 		// Skip if InternalReleaseImage manifest wasn't found.
 		if len(iri.FileList) > 0 {
 			files = append(files, appendIRIcerts(dependencies))
+			files = append(files, appendIRIRegistryCredentials(dependencies))
 		}
 	}
 
@@ -253,6 +256,29 @@ func appendIRIcerts(dependencies asset.Parents) *asset.File {
 	}{
 		IriTLSCert: base64.StdEncoding.EncodeToString(iriCertKey.Cert()),
 		IriTLSKey:  base64.StdEncoding.EncodeToString(iriCertKey.Key()),
+	}
+	fileData := applyTemplateData(f.Data, templateData)
+
+	return &asset.File{
+		Filename: path.Join(manifestDir, strings.TrimSuffix(filepath.Base(f.Filename), ".template")),
+		Data:     fileData,
+	}
+}
+
+// appendIRIRegistryCredentials renders the IRI registry auth secret template with the generated credentials.
+func appendIRIRegistryCredentials(dependencies asset.Parents) *asset.File {
+	iriAuth := &tls.IRIRegistryCredentials{}
+	iriAuthSecret := &bootkube.InternalReleaseImageRegistryAuthSecret{}
+	dependencies.Get(iriAuth, iriAuthSecret)
+
+	f := iriAuthSecret.Files()[0]
+
+	templateData := struct {
+		IriRegistryHtpasswd string
+		IriRegistryPassword string
+	}{
+		IriRegistryHtpasswd: base64.StdEncoding.EncodeToString([]byte(iriAuth.HtpasswdContent)),
+		IriRegistryPassword: base64.StdEncoding.EncodeToString([]byte(iriAuth.Password)),
 	}
 	fileData := applyTemplateData(f.Data, templateData)
 
