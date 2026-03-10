@@ -42,6 +42,12 @@ var computeReq = resourceRequirements{
 	minimumMemory: 8192,
 }
 
+const (
+	subnetTypePrivate = "private"
+	subnetTypePublic  = "public"
+	subnetTypeEdge    = "edge"
+)
+
 // Validate executes platform-specific validation.
 func Validate(ctx context.Context, meta *Metadata, config *types.InstallConfig) error {
 	allErrs := field.ErrorList{}
@@ -306,7 +312,6 @@ func (sdg *subnetDataGroups) From(ctx context.Context, meta *Metadata, providedS
 // validateSubnets ensures BYO subnets are valid.
 func validateSubnets(ctx context.Context, meta *Metadata, fldPath *field.Path, config *types.InstallConfig) field.ErrorList {
 	allErrs := field.ErrorList{}
-	networking := config.Networking
 	providedSubnets := config.AWS.VPC.Subnets
 	publish := config.Publish
 
@@ -337,16 +342,16 @@ func validateSubnets(ctx context.Context, meta *Metadata, fldPath *field.Path, c
 	}
 
 	allErrs = append(allErrs, validateSharedSubnets(ctx, meta, fldPath)...)
-	allErrs = append(allErrs, validateSubnetCIDR(fldPath, subnetDataGroups.Private, networking.MachineNetwork)...)
-	allErrs = append(allErrs, validateSubnetCIDR(fldPath, subnetDataGroups.Public, networking.MachineNetwork)...)
+	allErrs = append(allErrs, validateSubnetCIDRs(fldPath, subnetDataGroups.Private, config)...)
+	allErrs = append(allErrs, validateSubnetCIDRs(fldPath, subnetDataGroups.Public, config)...)
 
 	if len(subnetsWithRole) > 0 {
 		allErrs = append(allErrs, validateSubnetRoles(fldPath, subnetsWithRole, subnetDataGroups, config)...)
 	} else {
 		allErrs = append(allErrs, validateUntaggedSubnets(ctx, fldPath, meta, subnetDataGroups)...)
-		allErrs = append(allErrs, validateDuplicateSubnetZones(fldPath, subnetDataGroups.Private, "private")...)
-		allErrs = append(allErrs, validateDuplicateSubnetZones(fldPath, subnetDataGroups.Public, "public")...)
-		allErrs = append(allErrs, validateDuplicateSubnetZones(fldPath, subnetDataGroups.Edge, "edge")...)
+		allErrs = append(allErrs, validateDuplicateSubnetZones(fldPath, subnetDataGroups.Private, subnetTypePrivate)...)
+		allErrs = append(allErrs, validateDuplicateSubnetZones(fldPath, subnetDataGroups.Public, subnetTypePublic)...)
+		allErrs = append(allErrs, validateDuplicateSubnetZones(fldPath, subnetDataGroups.Edge, subnetTypeEdge)...)
 	}
 
 	privateZones := sets.New[string]()
@@ -639,27 +644,47 @@ func validateSecurityGroupIDs(ctx context.Context, meta *Metadata, fldPath *fiel
 	return allErrs
 }
 
-func validateSubnetCIDR(fldPath *field.Path, subnetDataGroup map[string]subnetData, networks []types.MachineNetworkEntry) field.ErrorList {
+func validateSubnetCIDRs(fldPath *field.Path, subnetDataGroup map[string]subnetData, ic *types.InstallConfig) field.ErrorList {
 	allErrs := field.ErrorList{}
+
 	for id, subnetData := range subnetDataGroup {
 		fp := fldPath.Index(subnetData.Idx)
-		cidr, _, err := net.ParseCIDR(subnetData.CIDR)
-		if err != nil {
-			allErrs = append(allErrs, field.Invalid(fp, id, err.Error()))
-			continue
+
+		// Validate subnetIPv4 CIDR
+		if len(subnetData.CIDR) == 0 {
+			allErrs = append(allErrs, field.Required(fp, "subnet does not have an associated IPv4 CIDR block"))
+		} else {
+			allErrs = append(allErrs, validateMachineNetworksContainSubnetCIDR(fp, ic.MachineNetwork, id, subnetData.CIDR)...)
 		}
-		allErrs = append(allErrs, validateMachineNetworksContainIP(fp, networks, id, cidr)...)
+
+		// If dualstack is enabled, the subnet must also have an IPv6 CIDR
+		if ic.AWS.IPFamily.DualStackEnabled() {
+			if len(subnetData.IPv6CIDR) == 0 {
+				allErrs = append(allErrs, field.Required(fp, "subnet does not have an associated IPv6 CIDR block"))
+			} else {
+				allErrs = append(allErrs, validateMachineNetworksContainSubnetCIDR(fp, ic.MachineNetwork, id, subnetData.IPv6CIDR)...)
+			}
+		}
 	}
+
 	return allErrs
 }
 
-func validateMachineNetworksContainIP(fldPath *field.Path, networks []types.MachineNetworkEntry, subnetName string, ip net.IP) field.ErrorList {
+func validateMachineNetworksContainSubnetCIDR(fldPath *field.Path, networks []types.MachineNetworkEntry, subnetName string, cidr string) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	cidrIP, _, err := net.ParseCIDR(cidr)
+	if err != nil {
+		return append(allErrs, field.Invalid(fldPath, subnetName, err.Error()))
+	}
+
 	for _, network := range networks {
-		if network.CIDR.Contains(ip) {
+		if network.CIDR.Contains(cidrIP) {
 			return nil
 		}
 	}
-	return field.ErrorList{field.Invalid(fldPath, subnetName, fmt.Sprintf("subnet's CIDR range start %s is outside of the specified machine networks", ip))}
+
+	return append(allErrs, field.Invalid(fldPath, subnetName, fmt.Sprintf("subnet's CIDR range start %s is outside of the specified machine networks", cidrIP)))
 }
 
 func validateDuplicateSubnetZones(fldPath *field.Path, subnetDataGroup map[string]subnetData, typ string) field.ErrorList {
@@ -771,9 +796,9 @@ func validateSubnetRoles(fldPath *field.Path, subnetsWithRole map[awstypes.Subne
 		}
 
 		if ingressSubnet.Public != config.PublicIngress() {
-			subnetType := "private"
+			subnetType := subnetTypePrivate
 			if ingressSubnet.Public {
-				subnetType = "public"
+				subnetType = subnetTypePublic
 			}
 			allErrs = append(allErrs, field.Invalid(fldPath.Index(ingressSubnet.Idx), ingressSubnet.ID,
 				fmt.Sprintf("subnet %s has role %s and is %s, which is not allowed when publish is set to %s", ingressSubnet.ID, awstypes.IngressControllerLBSubnetRole, subnetType, config.Publish)))
