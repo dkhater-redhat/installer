@@ -143,6 +143,11 @@ func TestAgentClusterInstall_Generate(t *testing.T) {
 		installConfigOverrides: `{"platform":{"baremetal":{"hosts":[{"name":"control-0.example.org","bmc":{"username":"bmc-user","password":"password","address":"172.22.0.10","disableCertificateVerification":true},"role":"master","bootMACAddress":"98:af:65:a5:8d:01","hardwareProfile":""},{"name":"control-1.example.org","bmc":{"username":"user2","password":"foo","address":"172.22.0.11","disableCertificateVerification":false},"role":"master","bootMACAddress":"98:af:65:a5:8d:02","hardwareProfile":""},{"name":"control-2.example.org","bmc":{"username":"admin","password":"bar","address":"172.22.0.12","disableCertificateVerification":true},"role":"master","bootMACAddress":"98:af:65:a5:8d:03","hardwareProfile":""}],"clusterProvisioningIP":"172.22.0.3","provisioningNetwork":"Managed","provisioningNetworkInterface":"eth0","provisioningNetworkCIDR":"172.22.0.0/24","provisioningDHCPRange":"172.22.0.10,172.22.0.254"}}}`,
 	})
 
+	goodBaremetalPlatformBMCGatewayACI := getGoodACI()
+	goodBaremetalPlatformBMCGatewayACI.SetAnnotations(map[string]string{
+		installConfigOverrides: `{"platform":{"baremetal":{"hosts":[{"name":"control-0.example.org","bmc":{"username":"bmc-user","password":"password","address":"172.22.0.10","disableCertificateVerification":true},"role":"master","bootMACAddress":"98:af:65:a5:8d:01","hardwareProfile":""},{"name":"control-1.example.org","bmc":{"username":"user2","password":"foo","address":"172.22.0.11","disableCertificateVerification":false},"role":"master","bootMACAddress":"98:af:65:a5:8d:02","hardwareProfile":""},{"name":"control-2.example.org","bmc":{"username":"admin","password":"bar","address":"172.22.0.12","disableCertificateVerification":true},"role":"master","bootMACAddress":"98:af:65:a5:8d:03","hardwareProfile":""}],"clusterProvisioningIP":"172.22.0.3","provisioningNetwork":"Managed","provisioningNetworkInterface":"eth0","provisioningNetworkCIDR":"172.22.0.0/24","provisioningDHCPRange":"172.22.0.10,172.22.0.254","provisioningNetworkGateway":"172.22.0.1"}}}`,
+	})
+
 	installConfigWithTrustBundlePolicy := getValidOptionalInstallConfig()
 	installConfigWithTrustBundlePolicy.Config.AdditionalTrustBundlePolicy = types.PolicyAlways
 
@@ -301,6 +306,16 @@ func TestAgentClusterInstall_Generate(t *testing.T) {
 				&agentconfig.AgentConfig{},
 			},
 			expectedConfig: goodBaremetalPlatformBMCACI,
+		},
+		{
+			name: "valid configuration BMC and provisioning network with gateway",
+			dependencies: []asset.Asset{
+				&workflow.AgentWorkflow{Workflow: workflow.AgentWorkflowTypeInstall},
+				getValidOptionalInstallConfigWithProvisioningGateway(),
+				getAgentHostsWithBMCConfig(),
+				&agentconfig.AgentConfig{},
+			},
+			expectedConfig: goodBaremetalPlatformBMCGatewayACI,
 		},
 		{
 			name: "valid configuration with AdditionalTrustBundlePolicy",

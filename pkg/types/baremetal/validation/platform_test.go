@@ -664,6 +664,58 @@ func TestValidateProvisioning(t *testing.T) {
 			expected: "Invalid value: \"172.22.0.20\": \"172.22.0.20\" overlaps with the allocated DHCP range",
 		},
 		{
+			name: "valid_provisioning_network_gateway",
+			platform: platform().
+				ProvisioningNetworkGateway("172.22.0.1").build(),
+			expected: "",
+		},
+		{
+			name: "invalid_provisioning_network_gateway_bad_ip",
+			platform: platform().
+				ProvisioningNetworkGateway("not-an-ip").build(),
+			expected: "provisioningNetworkGateway: Invalid value: \"not-an-ip\": \"not-an-ip\" is not a valid IP",
+		},
+		{
+			name: "invalid_provisioning_network_gateway_outside_cidr",
+			platform: platform().
+				ProvisioningNetworkGateway("192.168.1.1").build(),
+			expected: "provisioningNetworkGateway: Invalid value: \"192.168.1.1\": \"192.168.1.1\" is not in the provisioning network",
+		},
+		{
+			name: "invalid_provisioning_network_gateway_same_as_cluster_ip",
+			platform: platform().
+				ProvisioningNetworkGateway("172.22.0.3").build(),
+			expected: "provisioningNetworkGateway: Invalid value: \"172.22.0.3\": \"172.22.0.3\" overlaps with the IP address of the node that runs the bootstrap VM or provision server",
+		},
+		{
+			name: "invalid_provisioning_network_gateway_is_network_address",
+			platform: platform().
+				ProvisioningNetworkGateway("172.22.0.0").build(),
+			expected: "provisioningNetworkGateway: Invalid value: \"172.22.0.0\": \"172.22.0.0\" is the network address of the provisioning network",
+		},
+		{
+			name: "invalid_provisioning_network_gateway_is_broadcast_address",
+			platform: platform().
+				ProvisioningNetworkGateway("172.22.0.255").build(),
+			expected: "provisioningNetworkGateway: Invalid value: \"172.22.0.255\": \"172.22.0.255\" is the broadcast address of the provisioning network",
+		},
+		{
+			name: "invalid_provisioning_network_gateway_in_dhcp_range",
+			platform: platform().
+				ProvisioningDHCPRange("172.22.0.10,172.22.0.100").
+				ProvisioningNetworkGateway("172.22.0.50").build(),
+			expected: "Invalid value: \"172.22.0.50\": \"172.22.0.50\" overlaps with the allocated DHCP range",
+		},
+		{
+			name: "valid_provisioning_network_gateway_ipv6",
+			platform: platform().
+				ProvisioningNetworkCIDR("fd00::/64").
+				ClusterProvisioningIP("fd00::3").
+				BootstrapProvisioningIP("fd00::2").
+				ProvisioningNetworkGateway("fd00::1").build(),
+			expected: "",
+		},
+		{
 			name: "invalid_libvirturi",
 			platform: platform().
 				LibvirtURI("bad").build(),
@@ -964,6 +1016,11 @@ func (pb *platformBuilder) ClusterOSImage(value string) *platformBuilder {
 
 func (pb *platformBuilder) ProvisioningDHCPRange(value string) *platformBuilder {
 	pb.Platform.ProvisioningDHCPRange = value
+	return pb
+}
+
+func (pb *platformBuilder) ProvisioningNetworkGateway(value string) *platformBuilder {
+	pb.Platform.ProvisioningNetworkGateway = value
 	return pb
 }
 

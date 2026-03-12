@@ -105,3 +105,55 @@ func TestTemplatingUnmanagedIPv6(t *testing.T) {
 	assert.Equal(t, result.IronicPassword, "passw0rd")
 	assert.Equal(t, result.ExternalURLv6, "")
 }
+
+func TestTemplatingWithGateway(t *testing.T) {
+	bareMetalConfig := baremetal.Platform{
+		ProvisioningNetworkCIDR:    ipnet.MustParseCIDR("172.22.0.0/24"),
+		BootstrapProvisioningIP:    "172.22.0.2",
+		ProvisioningNetwork:        baremetal.ManagedProvisioningNetwork,
+		ProvisioningDHCPRange:      "172.22.0.10,172.22.0.100",
+		ProvisioningNetworkGateway: "172.22.0.1",
+		Hosts: []*baremetal.Host{
+			{
+				Role:           "master",
+				BootMACAddress: "c0:ff:ee:ca:fe:00",
+			},
+		},
+	}
+
+	openshiftDependency := []asset.Asset{
+		&manifests.Openshift{},
+	}
+	dependencies := asset.Parents{}
+	dependencies.Add(openshiftDependency...)
+	result := GetTemplateData(&bareMetalConfig, nil, 3, "bootstrap-ironic-user", "passw0rd", dependencies)
+
+	assert.Equal(t, result.ProvisioningNetworkGateway, "172.22.0.1")
+	assert.Equal(t, result.ProvisioningDHCPRange, "172.22.0.10,172.22.0.100,24")
+	assert.Equal(t, result.ProvisioningIPv6, false)
+}
+
+func TestTemplatingWithoutGateway(t *testing.T) {
+	bareMetalConfig := baremetal.Platform{
+		ProvisioningNetworkCIDR: ipnet.MustParseCIDR("172.22.0.0/24"),
+		BootstrapProvisioningIP: "172.22.0.2",
+		ProvisioningNetwork:     baremetal.ManagedProvisioningNetwork,
+		ProvisioningDHCPRange:   "172.22.0.10,172.22.0.100",
+		Hosts: []*baremetal.Host{
+			{
+				Role:           "master",
+				BootMACAddress: "c0:ff:ee:ca:fe:00",
+			},
+		},
+	}
+
+	openshiftDependency := []asset.Asset{
+		&manifests.Openshift{},
+	}
+	dependencies := asset.Parents{}
+	dependencies.Add(openshiftDependency...)
+	result := GetTemplateData(&bareMetalConfig, nil, 3, "bootstrap-ironic-user", "passw0rd", dependencies)
+
+	assert.Equal(t, result.ProvisioningNetworkGateway, "")
+	assert.Equal(t, result.ProvisioningDHCPRange, "172.22.0.10,172.22.0.100,24")
+}

@@ -276,6 +276,13 @@ func getValidOptionalInstallConfigWithProvisioning() *agent.OptionalInstallConfi
 	return installConfig
 }
 
+// getValidOptionalInstallConfigWithProvisioningGateway returns a valid optional install config with baremetal provisioning network settings including gateway.
+func getValidOptionalInstallConfigWithProvisioningGateway() *agent.OptionalInstallConfig {
+	installConfig := getValidOptionalInstallConfigWithProvisioning()
+	installConfig.Config.Platform.BareMetal.ProvisioningNetworkGateway = "172.22.0.1"
+	return installConfig
+}
+
 func getValidAgentConfig() *agentconfig.AgentConfig {
 	return &agentconfig.AgentConfig{
 		Config: &agenttypes.Config{

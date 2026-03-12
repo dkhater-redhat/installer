@@ -16,6 +16,9 @@ Volume=ironic.volume:/shared:z
 Environment="PROVISIONING_INTERFACE=${PROVISIONING_INTERFACE}"
 Environment="DHCP_RANGE=${DHCP_RANGE}"
 Environment="HTTP_PORT=${HTTP_PORT}"
+{{ if .PlatformData.BareMetal.ProvisioningNetworkGateway }}
+Environment="GATEWAY_IP={{.PlatformData.BareMetal.ProvisioningNetworkGateway}}"
+{{ end }}
 
 [Service]
 EnvironmentFile=/etc/ironic.env
