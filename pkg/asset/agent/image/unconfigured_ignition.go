@@ -23,6 +23,7 @@ import (
 	"github.com/openshift/installer/pkg/asset/ignition"
 	"github.com/openshift/installer/pkg/asset/ignition/bootstrap"
 	"github.com/openshift/installer/pkg/types"
+	agenttypes "github.com/openshift/installer/pkg/types/agent"
 	"github.com/openshift/installer/pkg/version"
 )
 
@@ -83,7 +84,7 @@ func (a *UnconfiguredIgnition) Dependencies() []asset.Asset {
 		&manifests.InfraEnvFile{},
 		&manifests.AgentPullSecret{},
 		&manifests.ClusterImageSet{},
-		&manifests.NMStateConfig{},
+		&manifests.NMStateConfigFile{},
 		&gencrypto.AuthConfig{},
 		&common.InfraEnvID{},
 	}
@@ -98,13 +99,21 @@ func (a *UnconfiguredIgnition) Generate(ctx context.Context, dependencies asset.
 	infraEnvIDAsset := &common.InfraEnvID{}
 	clusterImageSetAsset := &manifests.ClusterImageSet{}
 	pullSecretAsset := &manifests.AgentPullSecret{}
-	nmStateConfigs := &manifests.NMStateConfig{}
+	nmStateConfigFile := &manifests.NMStateConfigFile{}
 	agentConfig := &agentconfig.AgentConfig{}
 	authConfig := &gencrypto.AuthConfig{}
-	dependencies.Get(agentWorkflow, infraEnvAsset, clusterImageSetAsset, pullSecretAsset, nmStateConfigs, infraEnvIDAsset, agentConfig, authConfig)
+	dependencies.Get(agentWorkflow, infraEnvAsset, clusterImageSetAsset, pullSecretAsset, nmStateConfigFile, infraEnvIDAsset, agentConfig, authConfig)
 
 	if agentWorkflow.Workflow != workflow.AgentWorkflowTypeInstall {
 		return fmt.Errorf("AgentWorkflowType value not supported: %s", agentWorkflow.Workflow)
+	}
+
+	//  Validate that agent-config only contains rendezvousIP,
+	// since this is the only accepted configuration when used for the unconfigured-ignition workflow
+	if agentConfig.Config != nil {
+		if err := validateAgentConfigForUnconfiguredIgnition(agentConfig.Config); err != nil {
+			return err
+		}
 	}
 
 	infraEnv := infraEnvAsset.Config
@@ -193,8 +202,8 @@ func (a *UnconfiguredIgnition) Generate(ctx context.Context, dependencies asset.
 	a.ignAddFolders(&config, "/opt/agent/tls")
 
 	// Configure static networking if required.
-	if len(nmStateConfigs.StaticNetworkConfig) > 0 {
-		err = addStaticNetworkConfig(&config, nmStateConfigs.StaticNetworkConfig)
+	if len(nmStateConfigFile.StaticNetworkConfig) > 0 {
+		err = addStaticNetworkConfig(&config, nmStateConfigFile.StaticNetworkConfig)
 		if err != nil {
 			return err
 		}
@@ -298,4 +307,26 @@ func (a *UnconfiguredIgnition) Load(f asset.FileFetcher) (bool, error) {
 func (a *UnconfiguredIgnition) Files() []*asset.File {
 	// Return empty array because File will never be loaded.
 	return []*asset.File{}
+}
+
+// validateAgentConfigForUnconfiguredIgnition validates that agent-config only contains
+// rendezvousIP for the unconfigured-ignition workflow. All other fields should be empty.
+func validateAgentConfigForUnconfiguredIgnition(config *agenttypes.Config) error {
+	if len(config.Hosts) > 0 {
+		return errors.New("agent-config.yaml for unconfigured-ignition workflow must not contain hosts. Hosts configuration should be provided via nmstateconfig.yaml")
+	}
+
+	if len(config.AdditionalNTPSources) > 0 {
+		return errors.New("agent-config.yaml for unconfigured-ignition workflow must not contain additionalNTPSources. Only rendezvousIP is allowed")
+	}
+
+	if config.BootArtifactsBaseURL != "" {
+		return errors.New("agent-config.yaml for unconfigured-ignition workflow must not contain bootArtifactsBaseURL. Only rendezvousIP is allowed")
+	}
+
+	if config.MinimalISO {
+		return errors.New("agent-config.yaml for unconfigured-ignition workflow must not set minimalISO. Only rendezvousIP is allowed")
+	}
+
+	return nil
 }
