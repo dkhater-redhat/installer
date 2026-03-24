@@ -1,6 +1,8 @@
 package validation
 
 import (
+	"strings"
+
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	features "github.com/openshift/api/features"
@@ -22,6 +24,11 @@ func GatedFeatures(c *types.InstallConfig) []featuregates.GatedInstallConfigFeat
 			FeatureGateName: features.FeatureGateAWSDualStackInstall,
 			Condition:       c.AWS.IPFamily.DualStackEnabled(),
 			Field:           field.NewPath("platform", "aws", "ipFamily"),
+		},
+		{
+			FeatureGateName: features.FeatureGateAWSEuropeanSovereignCloudInstall,
+			Condition:       strings.HasPrefix(c.AWS.Region, "eusc-"),
+			Field:           field.NewPath("platform", "aws", "region"),
 		},
 	}
 
