@@ -139,6 +139,7 @@ func Machines(clusterID string, config *types.InstallConfig, pool *types.Machine
 				// we don't need to set Versions, because we control those via operators.
 			},
 		}
+		utils.SetMachineOSStreamLabels(&machine, config)
 
 		data.MachineFailureDomain[machine.Name] = failureDomain.Name
 
@@ -235,6 +236,7 @@ func Machines(clusterID string, config *types.InstallConfig, pool *types.Machine
 			},
 		},
 	}
+	utils.SetCPMSOSStreamLabels(data.ControlPlaneMachineSet, config)
 
 	return data, nil
 }

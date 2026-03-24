@@ -674,6 +674,10 @@ const (
 	OSImageStreamRHCOS9 OSImageStream = "rhel-9"
 	// OSImageStreamRHCOS10 represents the RHEL 10 OS Image Stream.
 	OSImageStreamRHCOS10 OSImageStream = "rhel-10"
+
+	// OSStreamLabelKey represents the label key used to note the OS image stream on MachineSet
+	// and Machine resources.
+	OSStreamLabelKey = "machineconfiguration.openshift.io/osstream"
 )
 
 // OSImageStreamValues holds the list of valid values a OSImageStream can take.
