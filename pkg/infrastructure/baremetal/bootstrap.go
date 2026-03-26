@@ -48,6 +48,12 @@ func newDomain(name string) libvirtxml.Domain {
 					},
 				},
 			},
+			Controllers: []libvirtxml.DomainController{
+				{
+					Type:  "scsi",
+					Model: "virtio-scsi",
+				},
+			},
 		},
 		Features: &libvirtxml.DomainFeatureList{
 			PAE:  &libvirtxml.DomainFeature{},
@@ -410,7 +416,7 @@ func createBootstrapDomain(virConn *libvirt.Libvirt, config baremetalConfig, poo
 	liveCD := libvirtxml.DomainDisk{
 		Device: "cdrom",
 		Target: &libvirtxml.DomainDiskTarget{
-			Bus: "sata",
+			Bus: "scsi",
 			Dev: "sda",
 		},
 		Driver: &libvirtxml.DomainDiskDriver{
@@ -426,6 +432,11 @@ func createBootstrapDomain(virConn *libvirt.Libvirt, config baremetalConfig, poo
 		Boot: &libvirtxml.DomainDeviceBoot{
 			Order: 1,
 		},
+	}
+	if arch == "x86_64" {
+		// x86 traditionally uses IDE or SATA (only the latter is supported
+		// with the q35 machine type) for cdrom devices
+		liveCD.Target.Bus = "sata"
 	}
 
 	scratchDisk := libvirtxml.DomainDisk{
