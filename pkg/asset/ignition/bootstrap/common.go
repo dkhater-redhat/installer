@@ -69,7 +69,6 @@ var (
 
 	rhcosEnabledServices = []string{
 		"chown-gatewayd-key.service",
-		"restart-sshd.service",
 		"systemd-journal-gatewayd.socket",
 	}
 )
