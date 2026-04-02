@@ -114,6 +114,15 @@ function gather_systemd_units() {
 	( >&2 echo " Done")
 }
 
+function gather_bootstrap_status() {
+	( >&2 echo  -n "Gathering bootstrap status" )
+	if [ -d /var/log/openshift ]; then
+		mkdir -p "${ARTIFACTS_DIR}/var/log/"
+		cp -a /var/log/openshift "${ARTIFACTS_DIR}/var/log/"
+	fi
+	( >&2 echo " Done")
+}
+
 function Help()
 {
 	echo "Gathers the necessary data for troubleshooting OpenShift's agent based installation"
@@ -157,6 +166,7 @@ gather_storage_data
 gather_container_status
 gather_database_data
 gather_systemd_units
+gather_bootstrap_status
 
 # Set permissions so regular users can delete the extracted content
 find "$ARTIFACTS_DIR" -type d -exec chmod a+rwx "{}" \;
