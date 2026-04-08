@@ -45,10 +45,13 @@ aliases:
     - Prashanth684
   powervs-approvers:
     - clnperez
+    - mjturek
+    - hamzy
     - mkumatag
     - Prashanth684
   powervs-reviewers:
     - clnperez
+    - hamzy
     - mkumatag
     - Prashanth684
     - mjturek
