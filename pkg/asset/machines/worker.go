@@ -554,6 +554,7 @@ func (w *Worker) Generate(ctx context.Context, dependencies asset.Parents) error
 				Role:                     pool.Name,
 				UserDataSecret:           workerUserDataSecretName,
 				Hosts:                    dHosts,
+				Config:                   installConfig.Config,
 			})
 			if err != nil {
 				return errors.Wrap(err, "failed to create worker machine objects")

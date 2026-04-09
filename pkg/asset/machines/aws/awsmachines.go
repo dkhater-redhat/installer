@@ -23,6 +23,7 @@ import (
 	"github.com/openshift/installer/pkg/types"
 	awstypes "github.com/openshift/installer/pkg/types/aws"
 	"github.com/openshift/installer/pkg/types/network"
+	"github.com/openshift/installer/pkg/utils"
 )
 
 // MachineInput defines the inputs needed to generate a machine asset.
@@ -35,6 +36,7 @@ type MachineInput struct {
 	PublicIpv4Pool string
 	IPFamily       network.IPFamily
 	Ignition       *capa.Ignition
+	Config         *types.InstallConfig
 }
 
 // GenerateMachines returns manifests and runtime objects to provision the control plane (including bootstrap, if applicable) nodes using CAPI.
@@ -119,6 +121,7 @@ func GenerateMachines(clusterID string, in *MachineInput) ([]*asset.RuntimeFile,
 			},
 		}
 		awsMachine.SetGroupVersionKind(capa.GroupVersion.WithKind("AWSMachine"))
+		utils.SetMachineOSStreamLabels(awsMachine, in.Config)
 
 		if throughput := mpool.EC2RootVolume.Throughput; throughput != nil {
 			awsMachine.Spec.RootVolume.Throughput = ptr.To(int64(*throughput))
@@ -199,6 +202,7 @@ func GenerateMachines(clusterID string, in *MachineInput) ([]*asset.RuntimeFile,
 			},
 		}
 		machine.SetGroupVersionKind(capi.GroupVersion.WithKind("Machine"))
+		utils.SetMachineOSStreamLabels(machine, in.Config)
 
 		result = append(result, &asset.RuntimeFile{
 			File:   asset.File{Filename: fmt.Sprintf("10_machine_%s.yaml", machine.Name)},
