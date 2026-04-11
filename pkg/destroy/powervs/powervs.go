@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	gohttp "net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,6 +37,19 @@ import (
 var (
 	defaultTimeout = 30 * time.Minute
 	stageTimeout   = 15 * time.Minute
+	timeNow        = time.Now
+)
+
+const (
+	// maxRetryAttempts is the hard cap on how many times we will retry a rate-limited call before giving up. Prevents infinite loops.
+	maxRetryAttempts = 8
+
+	// baseBackoffDuration is the starting wait duration when the server does not supply a Retry-After header. Each failed attempt doubles this value
+	// exponential backoff that is capped at maxBackoffDuration.
+	baseBackoffDuration = 2 * time.Second
+
+	// maxBackoffDuration caps the exponential backoff so we never wait longer than this between retries, regardless of attempt count.
+	maxBackoffDuration = 60 * time.Second
 )
 
 func leftInContext(ctx context.Context) time.Duration {
@@ -385,6 +399,121 @@ func (o *ClusterUninstaller) newAuthenticator(apikey string) (core.Authenticator
 	return authenticator, nil
 }
 
+// parseRetryAfterHeader parses the Retry-After header and returns the delay.
+// returns: The bool returned is true if the header was successfully parsed. False means the header was either absent or could not be parsed per spec.
+func parseRetryAfterHeader(headers []string) (time.Duration, bool) {
+	if len(headers) == 0 || headers[0] == "" {
+		return 0, false
+	}
+	header := headers[0]
+
+	if sleep, err := strconv.ParseInt(header, 10, 64); err == nil {
+		if sleep < 0 {
+			// Negative duration is not meaningful per spec, treat as invalid.
+			return 0, false
+		}
+		return time.Second * time.Duration(sleep), true
+	}
+
+	// For case when Retry-After is a date, e.g Fri, 31 Dec 1999 23:59:59 GMT (HTTP-Date)
+	retryTime, err := time.Parse(time.RFC1123, header)
+	if err != nil {
+		// Neither format matched, header present but unparseable.
+		return 0, false
+	}
+	if until := retryTime.Sub((timeNow())); until > 0 {
+		// Date is in the future, wait exactly this long.
+		return until, true
+	}
+	// Date is already in the past, header was valid, no wait needed.
+	// Return (0, true) so caller knows it was a valid header, just retry now.
+	return 0, true
+}
+
+// exponentialBackoffDuration returns the wait for a given attempt (0-indexed)
+// using exponential backoff: base * 2^attempt, capped at maxBackoffDuration.
+// Used as fallback when the server does not supply a Retry-After header.
+
+func exponentialBackoffDuration(attempt int) time.Duration {
+	wait := float64(baseBackoffDuration) * math.Pow(2, float64(attempt))
+	if wait > float64(maxBackoffDuration) {
+		return maxBackoffDuration
+	}
+	return time.Duration(wait)
+}
+
+// sleepWithContext sleeps for duration d, returning nil when the sleep completes normally.
+// Returns a wrapped error immediately if the context is cancelled or its deadline expires before d elapses.
+
+func sleepWithContext(ctx context.Context, d time.Duration) error {
+	if d == 0 {
+		// Zero means retry immediately, skip the select entirely.
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		// Context cancelled or deadline exceeded, stop retrying.
+		return fmt.Errorf("retry wait interrupted: %w", ctx.Err())
+	case <-time.After(d):
+		// Full duration elapsed, safe to retry.
+		return nil
+	}
+}
+
+// callWithRetry executes fn, retrying automatically on HTTP 429 responses.
+// The loop attempts at most maxRetryAttempts times total. Any non-429 error is returned immediately without retrying.
+func (o *ClusterUninstaller) callWithRetry(
+	ctx context.Context,
+	operationName string,
+	fn func() (*core.DetailedResponse, error),
+) error {
+	for attempt := 0; attempt < maxRetryAttempts; attempt++ {
+		// Execute the API call
+		detailedResponse, err := fn()
+
+		// Success
+		if err == nil {
+			return nil
+		}
+		// Non-retryable error: a non 429 status code indicates a real failure, retrying won't fix it.
+		if detailedResponse == nil || detailedResponse.StatusCode != gohttp.StatusTooManyRequests {
+			return fmt.Errorf("%s: %w", operationName, err)
+		}
+
+		// Rate limited (429), check for Retry-After header and wait accordingly before retrying.
+		var waitDuration time.Duration
+
+		duration, ok := parseRetryAfterHeader(detailedResponse.GetHeaders()["Retry-After"])
+		if ok {
+			// Server told us exactly how long to wait, honor it.
+			waitDuration = duration
+			o.Logger.Debugf(
+				"callWithRetry: %s rate limited (attempt %d/%d), "+
+					"honoring Retry-After: %v",
+				operationName, attempt+1, maxRetryAttempts, waitDuration,
+			)
+		} else {
+			// No valid Retry-After header, fall back to exponential backoff.
+			waitDuration = exponentialBackoffDuration(attempt)
+			o.Logger.Debugf(
+				"callWithRetry: %s rate limited (attempt %d/%d), "+
+					"no Retry-After header, exponential backoff: %v",
+				operationName, attempt+1, maxRetryAttempts, waitDuration,
+			)
+		}
+
+		// Sleep (interruptible by context cancellation)
+		if sleepErr := sleepWithContext(ctx, waitDuration); sleepErr != nil {
+			return fmt.Errorf("%s: %w", operationName, sleepErr)
+		}
+		// Loop back, attempt the API call again
+	}
+
+	// All attempts exhausted.
+	return fmt.Errorf("%s: exceeded maximum retry attempts (%d) due to rate limiting",
+		operationName, maxRetryAttempts)
+}
+
 func (o *ClusterUninstaller) loadSDKServices() error {
 	var (
 		err           error
@@ -516,7 +645,15 @@ func (o *ClusterUninstaller) loadSDKServices() error {
 
 		// Get the Zone ID
 		zoneOptions := o.zonesSvc.NewListZonesOptions()
-		zoneResources, detailedResponse, err := o.zonesSvc.ListZonesWithContext(ctx, zoneOptions)
+		var (
+			zoneResources    *zonesv1.ListZonesResp
+			detailedResponse *core.DetailedResponse
+		)
+
+		err = o.callWithRetry(ctx, "ListZonesWithContext", func() (*core.DetailedResponse, error) {
+			zoneResources, detailedResponse, err = o.zonesSvc.ListZonesWithContext(ctx, zoneOptions)
+			return detailedResponse, err
+		})
 		if err != nil {
 			return fmt.Errorf("loadSDKServices: Failed to list Zones: %w and the response is: %s", err, detailedResponse)
 		}
@@ -562,9 +699,16 @@ func (o *ClusterUninstaller) loadSDKServices() error {
 			return fmt.Errorf("failed to parse DNSInstanceCRN: %w", err)
 		}
 		options := o.dnsZonesSvc.NewListDnszonesOptions(dnsCRN.ServiceInstance)
-		listZonesResponse, detailedResponse, err := o.dnsZonesSvc.ListDnszones(options)
+		var (
+			listZonesResponse *dnszonesv1.ListDnszones
+			detailedResponse  *core.DetailedResponse
+		)
+		err = o.callWithRetry(ctx, "ListDNSZones", func() (*core.DetailedResponse, error) {
+			listZonesResponse, detailedResponse, err = o.dnsZonesSvc.ListDnszones(options)
+			return detailedResponse, err
+		})
 		if err != nil {
-			return fmt.Errorf("loadSDKServices: Failed to list Zones: %w and the response is: %s", err, detailedResponse)
+			return fmt.Errorf("loadSDKServices: Failed to list DNS Zones: %w and the response is: %s", err, detailedResponse)
 		}
 
 		for _, zone := range listZonesResponse.Dnszones {
