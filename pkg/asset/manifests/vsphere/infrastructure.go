@@ -52,22 +52,18 @@ func GetInfraPlatformSpec(ic *installconfig.InstallConfig, clusterID string) *co
 				},
 			}
 
-			if ic.Config.Enabled(features.FeatureGateVSphereHostVMGroupZonal) {
-				logrus.Debug("Host VM Group based zonal feature gate enabled")
-
-				if failureDomain.ZoneType == vsphere.HostGroupFailureDomain {
-					vmGroupAndRuleName := fmt.Sprintf("%s-%s", clusterID, failureDomain.Name)
-					failureDomainSpec.RegionAffinity = &configv1.VSphereFailureDomainRegionAffinity{
-						Type: configv1.VSphereFailureDomainRegionType(failureDomain.RegionType),
-					}
-					failureDomainSpec.ZoneAffinity = &configv1.VSphereFailureDomainZoneAffinity{
-						Type: configv1.VSphereFailureDomainZoneType(failureDomain.ZoneType),
-						HostGroup: &configv1.VSphereFailureDomainHostGroup{
-							HostGroup:  failureDomain.Topology.HostGroup,
-							VMGroup:    vmGroupAndRuleName,
-							VMHostRule: vmGroupAndRuleName,
-						},
-					}
+			if failureDomain.ZoneType == vsphere.HostGroupFailureDomain {
+				vmGroupAndRuleName := fmt.Sprintf("%s-%s", clusterID, failureDomain.Name)
+				failureDomainSpec.RegionAffinity = &configv1.VSphereFailureDomainRegionAffinity{
+					Type: configv1.VSphereFailureDomainRegionType(failureDomain.RegionType),
+				}
+				failureDomainSpec.ZoneAffinity = &configv1.VSphereFailureDomainZoneAffinity{
+					Type: configv1.VSphereFailureDomainZoneType(failureDomain.ZoneType),
+					HostGroup: &configv1.VSphereFailureDomainHostGroup{
+						HostGroup:  failureDomain.Topology.HostGroup,
+						VMGroup:    vmGroupAndRuleName,
+						VMHostRule: vmGroupAndRuleName,
+					},
 				}
 			}
 

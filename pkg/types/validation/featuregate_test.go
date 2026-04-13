@@ -121,6 +121,19 @@ func TestFeatureGates(t *testing.T) {
 			}(),
 		},
 		{
+			name: "vSphere HostGroup zonal configuration is allowed with default Feature Set",
+			installConfig: func() *types.InstallConfig {
+				c := validInstallConfig()
+				c.FeatureSet = v1.Default
+				c.AWS = nil // validInstallConfig defaults to AWS
+				c.VSphere = validVSpherePlatform()
+				c.VSphere.FailureDomains[0].RegionType = vsphere.ComputeClusterFailureDomain
+				c.VSphere.FailureDomains[0].ZoneType = vsphere.HostGroupFailureDomain
+				c.VSphere.FailureDomains[0].Topology.HostGroup = "host-group-a"
+				return c
+			}(),
+		},
+		{
 			name: "Azure user-assigned identities (control plane) > 1 requires MachineAPIMigration feature gate",
 			installConfig: func() *types.InstallConfig {
 				c := validInstallConfig()
