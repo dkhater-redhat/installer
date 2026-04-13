@@ -621,6 +621,13 @@ func (i *InfraProvider) collectManifests(ctx context.Context, cl client.Client) 
 			errorList = append(errorList, fmt.Errorf("failed to get GVK for manifest %s: %w", m.GetName(), err))
 			continue
 		}
+
+		// Skip secrets to avoid writing sensitive data to disk.
+		if gvk.Kind == "Secret" {
+			logrus.Debugf("Skipping secret manifest %s/%s", m.GetNamespace(), m.GetName())
+			continue
+		}
+
 		fileName := filepath.Join(clusterapi.ArtifactsDir, fmt.Sprintf("%s-%s-%s.yaml", gvk.Kind, m.GetNamespace(), m.GetName()))
 		objData, err := yaml.Marshal(m)
 		if err != nil {
