@@ -3043,6 +3043,20 @@ func TestValidateInstallConfig(t *testing.T) {
 			}(),
 			expectedError: "Unsupported OS Image Stream. Supported values are: rhel-9, rhel-10",
 		},
+		{
+			name: "sno on baremetal not supported",
+			installConfig: func() *types.InstallConfig {
+				c := validInstallConfig()
+				c.Platform = types.Platform{
+					BareMetal: validBareMetalPlatform(),
+				}
+				c.BootstrapInPlace = &types.BootstrapInPlace{
+					InstallationDisk: "/dev/sda",
+				}
+				return c
+			}(),
+			expectedError: `^bootstrapInPlace: Invalid value: "": Single Node OpenShift is not supported on the baremetal platform$`,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
